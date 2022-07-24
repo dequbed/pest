@@ -24,6 +24,8 @@ const_prec_climber = []
 # Enable faster `Position::line_col` calculation using SIMD
 # (note that this may have extra overhead for small inputs)
 fast-line-col = ["memchr", "bytecount"]
+# Enables error compatibility with miette
+miette = ["dep:miette", "std"]
 
 [dependencies]
 ucd-trie = { version = "0.1.5", default-features = false }
@@ -32,3 +34,7 @@ serde_json = { version = "1.0.85", optional = true}
 thiserror = { version = "1.0.37", optional = true }
 memchr = { version = "2", optional = true }
 bytecount = { version = "0.6", optional = true }
+miette = { version = "5.1.1", optional = true }
+
+[dev-dependencies]
+miette = { version = "5.1.1", features = ["fancy"] }

@@ -9,6 +9,9 @@
 
 //! Types for different kinds of parsing failures.
 
+#[cfg(feature = "miette")]
+use std::boxed::Box;
+
 use alloc::borrow::Cow;
 use alloc::borrow::ToOwned;
 use alloc::format;
@@ -26,7 +29,9 @@ use crate::RuleType;
 /// Parse-related error type.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[cfg_attr(feature = "std", derive(thiserror::Error))]
-pub struct Error<R> {
+#[cfg_attr(all(feature = "std", not(feature = "miette")), error("{}", self.format()))]
+#[cfg_attr(all(feature = "std", feature = "miette"), error("Failed to parse at {}", self.line_col))]
+pub struct Error<R: RuleType> {
     /// Variant of the error
     pub variant: ErrorVariant<R>,
     /// Location within the input string
@@ -38,11 +43,36 @@ pub struct Error<R> {
     continued_line: Option<String>,
 }
 
+#[cfg(feature = "miette")]
+impl<R: RuleType> miette::Diagnostic for Error<R> {
+    fn source_code(&self) -> Option<&dyn miette::SourceCode> {
+        Some(&self.line)
+    }
+
+    fn labels(&self) -> Option<Box<dyn Iterator<Item = miette::LabeledSpan>>> {
+        let message = self.variant.message().to_string();
+
+        let (offset, length) = match self.location {
+            InputLocation::Pos(x) => (x, 0),
+            InputLocation::Span((x, y)) => (x, y),
+        };
+
+        let span = miette::LabeledSpan::new(Some(message), offset, length);
+
+        Some(Box::new(std::iter::once(span)))
+    }
+
+    fn help<'a>(&'a self) -> Option<Box<dyn core::fmt::Display + 'a>> {
+        Some(Box::new(self.variant.message()))
+    }
+}
+
 /// Different kinds of parsing errors.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[cfg_attr(feature = "std", derive(thiserror::Error))]
-pub enum ErrorVariant<R> {
+pub enum ErrorVariant<R: RuleType> {
     /// Generated parsing error with expected and unexpected `Rule`s
+    #[cfg_attr(feature = "std", error("parsing error: {}", self.message()))]
     ParsingError {
         /// Positive attempts
         positives: Vec<R>,
@@ -50,6 +80,7 @@ pub enum ErrorVariant<R> {
         negatives: Vec<R>,
     },
     /// Custom error with a message
+    #[cfg_attr(feature = "std", error("{}", self.message()))]
     CustomError {
         /// Short explanation
         message: String,
@@ -72,6 +103,15 @@ pub enum LineColLocation {
     Pos((usize, usize)),
     /// Line/column pairs if `Error` was created by `Error::new_from_span`
     Span((usize, usize), (usize, usize)),
+}
+
+impl fmt::Display for LineColLocation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Pos((l, c)) => write!(f, "({}, {})", l, c),
+            Self::Span((ls, cs), (le, ce)) => write!(f, "({}, {}) to ({}, {})", ls, cs, le, ce),
+        }
+    }
 }
 
 impl<R: RuleType> Error<R> {
@@ -409,7 +449,7 @@ impl<R: RuleType> Error<R> {
         }
     }
 
-    pub(crate) fn format(&self) -> String {
+    pub fn format(&self) -> String {
         let spacing = self.spacing();
         let path = self
             .path
@@ -514,21 +554,6 @@ impl<R: RuleType> ErrorVariant<R> {
                 format!("{:?}", r)
             })),
             ErrorVariant::CustomError { ref message } => Cow::Borrowed(message),
-        }
-    }
-}
-
-impl<R: RuleType> fmt::Display for Error<R> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.format())
-    }
-}
-
-impl<R: RuleType> fmt::Display for ErrorVariant<R> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ErrorVariant::ParsingError { .. } => write!(f, "parsing error: {}", self.message()),
-            ErrorVariant::CustomError { .. } => write!(f, "{}", self.message()),
         }
     }
 }
